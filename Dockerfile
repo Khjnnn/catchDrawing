@@ -1,22 +1,14 @@
 # ── Build Stage ──
-FROM eclipse-temurin:17-jdk AS build
+FROM gradle:8.7-jdk17 AS build
 WORKDIR /app
 
-# Copy gradle wrapper and build files
-COPY gradle/ gradle/
-COPY gradlew build.gradle settings.gradle ./
+# Copy build files first (cached layer for dependencies)
+COPY build.gradle settings.gradle ./
+RUN gradle dependencies --no-daemon || true
 
-# Fix Windows CRLF line endings and set execute permission
-RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
-
-# Download dependencies first (cached layer)
-RUN ./gradlew dependencies --no-daemon || true
-
-# Copy source code
+# Copy source and build
 COPY src/ src/
-
-# Build the application
-RUN ./gradlew clean build -x test -x check --no-daemon
+RUN gradle clean build -x test -x check --no-daemon
 
 # ── Run Stage ──
 FROM eclipse-temurin:17-jre
