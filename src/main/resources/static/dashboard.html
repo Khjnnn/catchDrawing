@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 모니터링 대시보드</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #080c14;
+            color: #e2e8f0;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+        /* Animated Mesh Gradient Background */
+        .mesh-bg {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .mesh-blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: 0.35;
+            animation: float 12s ease-in-out infinite;
+        }
+        .blob-1 {
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, #6366f1, transparent 70%);
+            top: -10%; left: -5%;
+            animation-delay: 0s;
+        }
+        .blob-2 {
+            width: 400px; height: 400px;
+            background: radial-gradient(circle, #ec4899, transparent 70%);
+            top: 30%; right: -8%;
+            animation-delay: -4s;
+            animation-duration: 15s;
+        }
+        .blob-3 {
+            width: 450px; height: 450px;
+            background: radial-gradient(circle, #06b6d4, transparent 70%);
+            bottom: -10%; left: 25%;
+            animation-delay: -8s;
+            animation-duration: 18s;
+        }
+        .blob-4 {
+            width: 350px; height: 350px;
+            background: radial-gradient(circle, #f59e0b, transparent 70%);
+            top: 60%; left: -10%;
+            animation-delay: -2s;
+            animation-duration: 14s;
+            opacity: 0.2;
+        }
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            25% { transform: translate(30px, -40px) scale(1.05); }
+            50% { transform: translate(-20px, 20px) scale(0.95); }
+            75% { transform: translate(40px, 30px) scale(1.02); }
+        }
+        /* Header */
+        .header {
+            position: relative;
+            z-index: 10;
+            background: rgba(8, 12, 20, 0.6);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 14px 28px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0;
+            width: 100%; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(99,102,241,0.5), rgba(236,72,153,0.5), rgba(6,182,212,0.5), transparent);
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo-icon {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, #6366f1, #ec4899);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            box-shadow: 0 0 20px rgba(99,102,241,0.3);
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #c7d2fe, #fbcfe8, #a5f3fc);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: rgba(34,197,94,0.1);
+            border: 1px solid rgba(34,197,94,0.2);
+            border-radius: 20px;
+        }
+        .status-dot {
+            width: 7px; height: 7px;
+            background: #22c55e;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 6px rgba(34,197,94,0.6);
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .status-text { font-size: 12px; color: #86efac; font-weight: 500; }
+        .btn-whiteboard {
+            padding: 8px 18px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s;
+            text-decoration: none;
+            box-shadow: 0 2px 12px rgba(99,102,241,0.3);
+        }
+        .btn-whiteboard:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(99,102,241,0.5);
+        }
+        /* Content */
+        .container {
+            position: relative;
+            z-index: 10;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: rgba(15, 18, 30, 0.55);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 16px;
+            padding: 20px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+        .card:hover {
+            border-color: rgba(255,255,255,0.12);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.3);
+        }
+        .card-label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        .card-value {
+            font-size: 34px;
+            font-weight: 800;
+            line-height: 1;
+        }
+        .card-sub {
+            font-size: 11px;
+            color: #475569;
+            margin-top: 8px;
+        }
+        .text-blue {
+            color: #818cf8;
+            text-shadow: 0 0 20px rgba(129,140,248,0.3);
+        }
+        .text-green {
+            color: #34d399;
+            text-shadow: 0 0 20px rgba(52,211,153,0.3);
+        }
+        .text-amber {
+            color: #fbbf24;
+            text-shadow: 0 0 20px rgba(251,191,36,0.3);
+        }
+        .text-purple {
+            color: #c084fc;
+            text-shadow: 0 0 20px rgba(192,132,252,0.3);
+        }
+        .grid-main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .grid-bottom {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        .card h3 {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #94a3b8;
+            letter-spacing: 0.3px;
+        }
+        .chart-container {
+            position: relative;
+            height: 220px;
+        }
+        .service-list { display: flex; flex-direction: column; gap: 6px; }
+        .service-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.03);
+            transition: background 0.2s;
+        }
+        .service-item:hover { background: rgba(255,255,255,0.05); }
+        .service-left { display: flex; align-items: center; gap: 10px; }
+        .service-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+        }
+        .service-dot.up { background: #22c55e; box-shadow: 0 0 10px rgba(34,197,94,0.5); }
+        .service-dot.down { background: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,0.5); }
+        .service-name { font-size: 12px; color: #cbd5e1; }
+        .service-ms { font-size: 11px; color: #475569; }
+        .donut-wrapper { position: relative; width: 140px; height: 140px; }
+        .donut-label {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+        .donut-label .value { font-size: 22px; font-weight: 700; }
+        .donut-label .sub { font-size: 10px; color: #475569; }
+        .resource-row {
+            display: flex;
+            gap: 24px;
+            justify-content: center;
+        }
+        .event-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            max-height: 280px;
+            overflow-y: auto;
+        }
+        .event-list::-webkit-scrollbar { width: 3px; }
+        .event-list::-webkit-scrollbar-track { background: transparent; }
+        .event-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+        .event-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 10px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 8px;
+            font-size: 12px;
+            animation: fadeIn 0.3s ease;
+            border: 1px solid rgba(255,255,255,0.02);
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+        .event-badge {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .badge-INFO { background: rgba(129,140,248,0.12); color: #818cf8; }
+        .badge-SUCCESS { background: rgba(52,211,153,0.12); color: #34d399; }
+        .badge-WARN { background: rgba(251,191,36,0.12); color: #fbbf24; }
+        .event-time { color: #374151; white-space: nowrap; font-weight: 500; }
+        .event-msg { color: #94a3b8; flex: 1; }
+        @media (max-width: 1024px) {
+            .grid-4 { grid-template-columns: repeat(2, 1fr); }
+            .grid-main { grid-template-columns: 1fr; }
+            .grid-bottom { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 600px) {
+            .grid-4 { grid-template-columns: repeat(2, 1fr); }
+            .container { padding: 10px; }
+            .header {
+                padding: 10px 14px;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .header-left { flex: 1; min-width: 0; }
+            .header h1 { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .logo-icon { width: 30px; height: 30px; font-size: 14px; flex-shrink: 0; }
+            .header-right { gap: 8px; }
+            .status-pill { padding: 4px 8px; }
+            .status-text { font-size: 10px; }
+            .btn-whiteboard { padding: 6px 12px; font-size: 11px; }
+            .card-value { font-size: 24px; }
+            .card { padding: 14px; }
+            .resource-row { flex-direction: column; align-items: center; gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Mesh Gradient Background -->
+    <div class="mesh-bg">
+        <div class="mesh-blob blob-1"></div>
+        <div class="mesh-blob blob-2"></div>
+        <div class="mesh-blob blob-3"></div>
+        <div class="mesh-blob blob-4"></div>
+    </div>
+
+    <div class="header">
+        <div class="header-left">
+            <div class="logo-icon">📊</div>
+            <h1>실시간 모니터링 대시보드</h1>
+        </div>
+        <div class="header-right">
+            <div class="status-pill">
+                <div class="status-dot"></div>
+                <span class="status-text" id="connStatus">연결 중...</span>
+            </div>
+            <a href="/whiteboard.html" class="btn-whiteboard">🎨 화이트보드</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Top Cards -->
+        <div class="grid-4">
+            <div class="card">
+                <div class="card-label">메시지/초</div>
+                <div class="card-value text-blue" id="tpsValue">--</div>
+                <div class="card-sub">WebSocket 메시지 처리량</div>
+            </div>
+            <div class="card">
+                <div class="card-label">메모리 사용</div>
+                <div class="card-value text-green" id="rtValue">--</div>
+                <div class="card-sub">JVM Heap 사용률</div>
+            </div>
+            <div class="card">
+                <div class="card-label">접속자</div>
+                <div class="card-value text-amber" id="usersValue">--</div>
+                <div class="card-sub">WebSocket 연결 수</div>
+            </div>
+            <div class="card">
+                <div class="card-label">그리기 이벤트</div>
+                <div class="card-value text-purple" id="reqValue">--</div>
+                <div class="card-sub">누적 Draw 이벤트</div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="grid-main">
+            <div class="card">
+                <h3>📈 메시지 처리량 (최근 30초)</h3>
+                <div class="chart-container">
+                    <canvas id="tpsChart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <h3>💾 메모리 사용률 추이 (최근 30초)</h3>
+                <div class="chart-container">
+                    <canvas id="rtChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Row -->
+        <div class="grid-bottom">
+            <div class="card">
+                <h3>🔌 서비스 상태</h3>
+                <div class="service-list" id="serviceList"></div>
+            </div>
+            <div class="card">
+                <h3>💻 리소스 사용률</h3>
+                <div class="resource-row">
+                    <div class="donut-wrapper">
+                        <canvas id="cpuChart"></canvas>
+                        <div class="donut-label">
+                            <div class="value text-blue" id="cpuLabel">--%</div>
+                            <div class="sub">CPU</div>
+                        </div>
+                    </div>
+                    <div class="donut-wrapper">
+                        <canvas id="memChart"></canvas>
+                        <div class="donut-label">
+                            <div class="value text-purple" id="memLabel">--%</div>
+                            <div class="sub">Memory</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>📋 실시간 이벤트 로그</h3>
+                <div class="event-list" id="eventList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MAX_POINTS = 30;
+        const tpsData = [];
+        const rtData = [];
+        const labels = [];
+
+        // Chart defaults
+        Chart.defaults.color = '#64748b';
+        Chart.defaults.borderColor = 'rgba(45,45,94,0.5)';
+
+        function createLineChart(ctx, label, color) {
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: label,
+                        data: label === 'TPS' ? tpsData : rtData,
+                        borderColor: color,
+                        backgroundColor: color.replace('1)', '0.1)'),
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHitRadius: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 300 },
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            ticks: { maxTicksLimit: 6, font: { size: 10 } },
+                            grid: { display: false }
+                        },
+                        y: {
+                            ticks: { font: { size: 10 } },
+                            grid: { color: 'rgba(45,45,94,0.3)' }
+                        }
+                    }
+                }
+            });
+        }
+
+        const tpsChart = createLineChart(
+            document.getElementById('tpsChart').getContext('2d'),
+            'TPS', 'rgba(96,165,250,1)'
+        );
+        const rtChart = createLineChart(
+            document.getElementById('rtChart').getContext('2d'),
+            'RT', 'rgba(52,211,153,1)'
+        );
+
+        function createDonut(ctx, color) {
+            return new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [0, 100],
+                        backgroundColor: [color, 'rgba(45,45,94,0.3)'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '75%',
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    animation: { duration: 500 }
+                }
+            });
+        }
+
+        const cpuChart = createDonut(document.getElementById('cpuChart').getContext('2d'), '#60a5fa');
+        const memChart = createDonut(document.getElementById('memChart').getContext('2d'), '#a78bfa');
+
+        function updateMetrics(data) {
+            // Cards
+            document.getElementById('tpsValue').textContent = data.tps.toLocaleString();
+            document.getElementById('rtValue').textContent = data.responseTime + '%';
+            document.getElementById('usersValue').textContent = data.activeUsers.toLocaleString();
+            document.getElementById('reqValue').textContent = data.totalRequests.toLocaleString();
+
+            // Line charts
+            labels.push(data.timestamp);
+            tpsData.push(data.tps);
+            rtData.push(data.responseTime);
+            if (labels.length > MAX_POINTS) {
+                labels.shift();
+                tpsData.shift();
+                rtData.shift();
+            }
+            tpsChart.update();
+            rtChart.update();
+
+            // Donut charts
+            cpuChart.data.datasets[0].data = [data.cpuUsage, 100 - data.cpuUsage];
+            memChart.data.datasets[0].data = [data.memoryUsage, 100 - data.memoryUsage];
+            cpuChart.update();
+            memChart.update();
+            document.getElementById('cpuLabel').textContent = data.cpuUsage + '%';
+            document.getElementById('memLabel').textContent = data.memoryUsage + '%';
+
+            // Service list
+            const list = document.getElementById('serviceList');
+            list.innerHTML = data.services.map(s => `
+                <div class="service-item">
+                    <div class="service-left">
+                        <div class="service-dot ${s.up ? 'up' : 'down'}"></div>
+                        <span class="service-name">${s.name}</span>
+                    </div>
+                    <span class="service-ms">${s.up ? s.responseTime.toFixed(0) + 'ms' : 'DOWN'}</span>
+                </div>
+            `).join('');
+        }
+
+        function addEvent(event) {
+            const list = document.getElementById('eventList');
+            const el = document.createElement('div');
+            el.className = 'event-item';
+            el.innerHTML = `
+                <span class="event-badge badge-${event.level}">${event.level}</span>
+                <span class="event-time">${event.timestamp}</span>
+                <span class="event-msg">[${event.type}] ${event.message}</span>
+            `;
+            list.prepend(el);
+            // Keep max 50 events
+            while (list.children.length > 50) {
+                list.removeChild(list.lastChild);
+            }
+        }
+
+        // WebSocket connection
+        function connect() {
+            const socket = new SockJS('/ws');
+            const stompClient = Stomp.over(socket);
+            stompClient.debug = null; // Suppress debug logs
+
+            stompClient.connect({}, function() {
+                document.getElementById('connStatus').textContent = 'Connected';
+
+                stompClient.subscribe('/topic/metrics', function(msg) {
+                    updateMetrics(JSON.parse(msg.body));
+                });
+
+                stompClient.subscribe('/topic/events', function(msg) {
+                    addEvent(JSON.parse(msg.body));
+                });
+            }, function(error) {
+                document.getElementById('connStatus').textContent = '재연결 중...';
+                setTimeout(connect, 3000);
+            });
+        }
+
+        connect();
+    </script>
+</body>
+</html>

@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 협업 화이트보드</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.6.1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #080c14;
+            color: #e2e8f0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        /* Header */
+        .header {
+            position: relative;
+            z-index: 10;
+            background: rgba(8, 12, 20, 0.7);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0;
+            width: 100%; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(236,72,153,0.5), rgba(168,85,247,0.5), rgba(99,102,241,0.5), transparent);
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo-icon {
+            width: 34px; height: 34px;
+            background: linear-gradient(135deg, #ec4899, #a855f7);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            box-shadow: 0 0 20px rgba(236,72,153,0.3);
+        }
+        .header h1 {
+            font-size: 17px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fbcfe8, #e9d5ff, #c7d2fe);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .btn-back {
+            padding: 7px 16px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s;
+            text-decoration: none;
+            box-shadow: 0 2px 12px rgba(99,102,241,0.3);
+        }
+        .btn-back:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(99,102,241,0.5);
+        }
+        .conn-badge {
+            font-size: 11px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            background: rgba(34,197,94,0.1);
+            border: 1px solid rgba(34,197,94,0.2);
+            color: #86efac;
+            font-weight: 500;
+        }
+        .main-area {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        /* Toolbar */
+        .toolbar {
+            width: 60px;
+            background: rgba(10, 14, 24, 0.8);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-right: 1px solid rgba(255,255,255,0.06);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 0;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .tool-btn {
+            width: 42px; height: 42px;
+            background: transparent;
+            border: 2px solid transparent;
+            border-radius: 10px;
+            color: #64748b;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.15s;
+        }
+        .tool-btn:hover { background: rgba(255,255,255,0.05); color: #94a3b8; }
+        .tool-btn.active {
+            border-color: rgba(168,85,247,0.5);
+            color: #c4b5fd;
+            background: rgba(168,85,247,0.1);
+            box-shadow: 0 0 12px rgba(168,85,247,0.15);
+        }
+        .tool-divider {
+            width: 30px;
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+            margin: 6px 0;
+        }
+        .color-btn {
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin: 2px 0;
+        }
+        .color-btn:hover { transform: scale(1.2); }
+        .color-btn.active {
+            border-color: rgba(255,255,255,0.8);
+            box-shadow: 0 0 12px rgba(255,255,255,0.2);
+        }
+        .size-slider {
+            writing-mode: bt-lr;
+            -webkit-appearance: none;
+            appearance: none;
+            width: 80px;
+            transform: rotate(-90deg);
+            margin: 30px 0;
+            background: transparent;
+        }
+        .size-slider::-webkit-slider-runnable-track {
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+        }
+        .size-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px; height: 14px;
+            background: linear-gradient(135deg, #a855f7, #6366f1);
+            border-radius: 50%;
+            margin-top: -5px;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(168,85,247,0.4);
+        }
+        .size-label {
+            font-size: 10px;
+            color: #475569;
+            text-align: center;
+        }
+        /* Canvas */
+        .canvas-area {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: #0d1117;
+        }
+        #drawCanvas {
+            display: block;
+            cursor: crosshair;
+        }
+        /* Remote cursors */
+        .remote-cursor {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+            transition: left 0.1s, top 0.1s;
+        }
+        .cursor-pointer {
+            width: 0; height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 12px solid var(--cursor-color, #f472b6);
+            transform: rotate(-30deg);
+        }
+        .cursor-name {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--cursor-color, #f472b6);
+            color: #fff;
+            white-space: nowrap;
+            margin-left: 8px;
+            margin-top: -2px;
+            font-weight: 600;
+        }
+        /* Users panel */
+        .users-panel {
+            width: 180px;
+            background: rgba(10, 14, 24, 0.8);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-left: 1px solid rgba(255,255,255,0.06);
+            padding: 16px 12px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .users-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 12px;
+        }
+        .users-list {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            overflow-y: auto;
+        }
+        .user-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 10px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.03);
+            border-radius: 8px;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        .user-item:hover { background: rgba(255,255,255,0.05); }
+        .user-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .btn-clear {
+            margin-top: 12px;
+            padding: 9px;
+            background: rgba(239,68,68,0.1);
+            color: #f87171;
+            border: 1px solid rgba(239,68,68,0.2);
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s;
+        }
+        .btn-clear:hover {
+            background: rgba(239,68,68,0.2);
+            box-shadow: 0 0 16px rgba(239,68,68,0.15);
+        }
+        /* Mobile Floating Toolbar Toggle */
+        .fab-tools {
+            display: none;
+            position: fixed;
+            bottom: 20px; left: 20px;
+            width: 48px; height: 48px;
+            background: linear-gradient(135deg, #a855f7, #6366f1);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 22px;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(168,85,247,0.4);
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+        .fab-tools:active { transform: scale(0.9); }
+        .fab-users {
+            display: none;
+            position: fixed;
+            bottom: 20px; right: 20px;
+            width: 48px; height: 48px;
+            background: linear-gradient(135deg, #06b6d4, #3b82f6);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(6,182,212,0.4);
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+        .fab-users:active { transform: scale(0.9); }
+        .mobile-toolbar {
+            display: none;
+            position: fixed;
+            bottom: 80px; left: 12px;
+            background: rgba(10, 14, 24, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 12px;
+            z-index: 100;
+            flex-wrap: wrap;
+            gap: 6px;
+            width: 200px;
+            animation: modalIn 0.2s ease;
+        }
+        .mobile-toolbar.active { display: flex; }
+        .mobile-toolbar .tool-btn { width: 38px; height: 38px; font-size: 16px; }
+        .mobile-toolbar .color-btn { width: 28px; height: 28px; }
+        .mobile-toolbar .tool-divider { width: 100%; height: 1px; margin: 4px 0; }
+        .mobile-toolbar .size-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+        }
+        .mobile-toolbar .size-row input {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            outline: none;
+        }
+        .mobile-toolbar .size-row input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px; height: 14px;
+            background: linear-gradient(135deg, #a855f7, #6366f1);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .mobile-users-panel {
+            display: none;
+            position: fixed;
+            bottom: 80px; right: 12px;
+            background: rgba(10, 14, 24, 0.95);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 14px;
+            z-index: 100;
+            width: 200px;
+            max-height: 280px;
+            overflow-y: auto;
+            animation: modalIn 0.2s ease;
+        }
+        .mobile-users-panel.active { display: block; }
+        .mobile-users-panel .users-title { margin-bottom: 10px; }
+        .mobile-users-panel .users-list { gap: 5px; }
+        .mobile-users-panel .btn-clear { margin-top: 10px; }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 10px 14px;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .header-left { flex: 1; min-width: 0; }
+            .header h1 { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .logo-icon { width: 28px; height: 28px; font-size: 14px; flex-shrink: 0; border-radius: 8px; }
+            .header-right { gap: 8px; }
+            .conn-badge { font-size: 10px; padding: 3px 8px; }
+            .btn-back { padding: 5px 10px; font-size: 11px; border-radius: 8px; }
+            .toolbar { display: none; }
+            .users-panel { display: none; }
+            .fab-tools { display: flex; }
+            .fab-users { display: flex; }
+            .main-area { flex-direction: column; }
+        }
+
+        /* Custom Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-box {
+            background: rgba(15, 18, 30, 0.9);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 32px;
+            width: 340px;
+            text-align: center;
+            animation: modalIn 0.25s ease;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.9) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .modal-icon {
+            width: 56px; height: 56px;
+            margin: 0 auto 16px;
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        .modal-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #f1f5f9;
+        }
+        .modal-desc {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .modal-btns {
+            display: flex;
+            gap: 10px;
+        }
+        .modal-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+        .modal-btn.cancel {
+            background: rgba(255,255,255,0.06);
+            color: #94a3b8;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .modal-btn.cancel:hover { background: rgba(255,255,255,0.1); }
+        .modal-btn.confirm {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            box-shadow: 0 2px 12px rgba(239,68,68,0.3);
+        }
+        .modal-btn.confirm:hover {
+            box-shadow: 0 6px 24px rgba(239,68,68,0.4);
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <div class="logo-icon">🎨</div>
+            <h1>실시간 협업 화이트보드</h1>
+        </div>
+        <div class="header-right">
+            <span class="conn-badge" id="connStatus">연결 중...</span>
+            <a href="/dashboard.html" class="btn-back">📊 대시보드</a>
+        </div>
+    </div>
+
+    <div class="main-area">
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <button class="tool-btn active" data-tool="pen" title="펜">✏️</button>
+            <button class="tool-btn" data-tool="eraser" title="지우개">🧹</button>
+            <button class="tool-btn" data-tool="rect" title="사각형">⬜</button>
+            <button class="tool-btn" data-tool="circle" title="원">⭕</button>
+
+            <div class="tool-divider"></div>
+
+            <button class="color-btn active" data-color="#ef4444" style="background:#ef4444"></button>
+            <button class="color-btn" data-color="#3b82f6" style="background:#3b82f6"></button>
+            <button class="color-btn" data-color="#22c55e" style="background:#22c55e"></button>
+            <button class="color-btn" data-color="#eab308" style="background:#eab308"></button>
+            <button class="color-btn" data-color="#a855f7" style="background:#a855f7"></button>
+            <button class="color-btn" data-color="#ffffff" style="background:#ffffff"></button>
+
+            <div class="tool-divider"></div>
+
+            <span class="size-label" id="sizeLabel">3px</span>
+            <input type="range" class="size-slider" id="lineWidth" min="1" max="20" value="3">
+        </div>
+
+        <!-- Canvas -->
+        <div class="canvas-area" id="canvasArea">
+            <canvas id="drawCanvas"></canvas>
+        </div>
+
+        <!-- Users Panel -->
+        <div class="users-panel">
+            <div class="users-title">접속 중인 사용자</div>
+            <div class="users-list" id="usersList"></div>
+            <button class="btn-clear" id="clearBtn">🗑️ 전체 지우기</button>
+        </div>
+    </div>
+
+    <!-- Mobile Floating Buttons -->
+    <button class="fab-tools" id="fabTools">🎨</button>
+    <button class="fab-users" id="fabUsers">👥</button>
+
+    <!-- Mobile Toolbar Popup -->
+    <div class="mobile-toolbar" id="mobileToolbar">
+        <button class="tool-btn active" data-tool="pen" title="펜">✏️</button>
+        <button class="tool-btn" data-tool="eraser" title="지우개">🧹</button>
+        <button class="tool-btn" data-tool="rect" title="사각형">⬜</button>
+        <button class="tool-btn" data-tool="circle" title="원">⭕</button>
+        <div class="tool-divider"></div>
+        <button class="color-btn active" data-color="#ef4444" style="background:#ef4444"></button>
+        <button class="color-btn" data-color="#3b82f6" style="background:#3b82f6"></button>
+        <button class="color-btn" data-color="#22c55e" style="background:#22c55e"></button>
+        <button class="color-btn" data-color="#eab308" style="background:#eab308"></button>
+        <button class="color-btn" data-color="#a855f7" style="background:#a855f7"></button>
+        <button class="color-btn" data-color="#ffffff" style="background:#ffffff"></button>
+        <div class="tool-divider"></div>
+        <div class="size-row">
+            <span class="size-label" id="mSizeLabel">3px</span>
+            <input type="range" id="mLineWidth" min="1" max="20" value="3">
+        </div>
+    </div>
+
+    <!-- Mobile Users Panel Popup -->
+    <div class="mobile-users-panel" id="mobileUsersPanel">
+        <div class="users-title">접속 중인 사용자</div>
+        <div class="users-list" id="mobileUsersList"></div>
+        <button class="btn-clear" id="mobileClearBtn">🗑️ 전체 지우기</button>
+    </div>
+
+    <!-- Custom Confirm Modal -->
+    <div class="modal-overlay" id="clearModal">
+        <div class="modal-box">
+            <div class="modal-icon">🗑️</div>
+            <div class="modal-title">전체 지우기</div>
+            <div class="modal-desc">화이트보드의 모든 내용이 삭제됩니다.<br>접속 중인 모든 사용자에게 적용됩니다.</div>
+            <div class="modal-btns">
+                <button class="modal-btn cancel" id="clearCancel">취소</button>
+                <button class="modal-btn confirm" id="clearConfirm">지우기</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State ---
+        const boardId = 'main';
+        const myId = 'user-' + Math.random().toString(36).substring(2, 8);
+        const nicknames = ['다람쥐', '토끼', '고양이', '강아지', '판다', '여우', '곰돌이', '햄스터', '부엉이', '펭귄'];
+        const myNickname = nicknames[Math.floor(Math.random() * nicknames.length)] + Math.floor(Math.random() * 100);
+        const cursorColors = ['#f472b6', '#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#f97316'];
+        const myColor = cursorColors[Math.floor(Math.random() * cursorColors.length)];
+
+        let currentTool = 'pen';
+        let currentColor = '#ef4444';
+        let lineWidth = 3;
+        let isDrawing = false;
+        let lastX = 0, lastY = 0;
+        let shapeStartX = 0, shapeStartY = 0;
+        let stompClient = null;
+        const remoteCursors = {};
+        const remoteUsers = {};
+        let canvasSnapshot = null;
+
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('drawCanvas');
+        const ctx = canvas.getContext('2d');
+        const canvasArea = document.getElementById('canvasArea');
+
+        function resizeCanvas() {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            tempCanvas.getContext('2d').drawImage(canvas, 0, 0);
+
+            canvas.width = canvasArea.clientWidth;
+            canvas.height = canvasArea.clientHeight;
+
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- Toolbar (synced desktop + mobile) ---
+        function syncToolBtns(tool) {
+            document.querySelectorAll('.tool-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.tool === tool);
+            });
+            currentTool = tool;
+            canvas.style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+        }
+        function syncColorBtns(color) {
+            document.querySelectorAll('.color-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.color === color);
+            });
+            currentColor = color;
+        }
+        function syncSize(val) {
+            lineWidth = val;
+            document.getElementById('sizeLabel').textContent = val + 'px';
+            document.getElementById('lineWidth').value = val;
+            document.getElementById('mSizeLabel').textContent = val + 'px';
+            document.getElementById('mLineWidth').value = val;
+        }
+
+        document.querySelectorAll('.tool-btn').forEach(btn => {
+            btn.addEventListener('click', () => syncToolBtns(btn.dataset.tool));
+        });
+        document.querySelectorAll('.color-btn').forEach(btn => {
+            btn.addEventListener('click', () => syncColorBtns(btn.dataset.color));
+        });
+
+        document.getElementById('lineWidth').addEventListener('input', (e) => syncSize(parseInt(e.target.value)));
+        document.getElementById('mLineWidth').addEventListener('input', (e) => syncSize(parseInt(e.target.value)));
+
+        // --- Mobile FAB Toggle ---
+        const mobileToolbar = document.getElementById('mobileToolbar');
+        const mobileUsersPanel = document.getElementById('mobileUsersPanel');
+
+        document.getElementById('fabTools').addEventListener('click', () => {
+            mobileToolbar.classList.toggle('active');
+            mobileUsersPanel.classList.remove('active');
+        });
+        document.getElementById('fabUsers').addEventListener('click', () => {
+            mobileUsersPanel.classList.toggle('active');
+            mobileToolbar.classList.remove('active');
+        });
+        // Close panels when tapping canvas
+        document.getElementById('drawCanvas').addEventListener('touchstart', () => {
+            mobileToolbar.classList.remove('active');
+            mobileUsersPanel.classList.remove('active');
+        }, { passive: true });
+
+        // --- Drawing ---
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: (clientX - rect.left) / rect.width,
+                y: (clientY - rect.top) / rect.height
+            };
+        }
+
+        function drawLine(fromX, fromY, toX, toY, color, width) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.beginPath();
+            ctx.moveTo(fromX * canvas.width, fromY * canvas.height);
+            ctx.lineTo(toX * canvas.width, toY * canvas.height);
+            ctx.stroke();
+        }
+
+        function drawEraser(fromX, fromY, toX, toY, width) {
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.lineWidth = width * 3;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.beginPath();
+            ctx.moveTo(fromX * canvas.width, fromY * canvas.height);
+            ctx.lineTo(toX * canvas.width, toY * canvas.height);
+            ctx.stroke();
+        }
+
+        function drawRect(fromX, fromY, toX, toY, color, width) {
+            const x = Math.min(fromX, toX) * canvas.width;
+            const y = Math.min(fromY, toY) * canvas.height;
+            const w = Math.abs(toX - fromX) * canvas.width;
+            const h = Math.abs(toY - fromY) * canvas.height;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeRect(x, y, w, h);
+        }
+
+        function drawCircle(fromX, fromY, toX, toY, color, width) {
+            const cx = ((fromX + toX) / 2) * canvas.width;
+            const cy = ((fromY + toY) / 2) * canvas.height;
+            const rx = (Math.abs(toX - fromX) / 2) * canvas.width;
+            const ry = (Math.abs(toY - fromY) / 2) * canvas.height;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, Math.max(rx, 1), Math.max(ry, 1), 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        function saveSnapshot() {
+            canvasSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        }
+
+        function restoreSnapshot() {
+            if (canvasSnapshot) ctx.putImageData(canvasSnapshot, 0, 0);
+        }
+
+        canvas.addEventListener('mousedown', startDraw);
+        canvas.addEventListener('mousemove', onDraw);
+        canvas.addEventListener('mouseup', endDraw);
+        canvas.addEventListener('mouseleave', endDraw);
+        canvas.addEventListener('touchstart', e => { e.preventDefault(); startDraw(e); });
+        canvas.addEventListener('touchmove', e => { e.preventDefault(); onDraw(e); });
+        canvas.addEventListener('touchend', e => { e.preventDefault(); endDraw(e); });
+
+        function startDraw(e) {
+            isDrawing = true;
+            const pos = getPos(e);
+            lastX = pos.x;
+            lastY = pos.y;
+            if (currentTool === 'rect' || currentTool === 'circle') {
+                shapeStartX = pos.x;
+                shapeStartY = pos.y;
+                saveSnapshot();
+            }
+        }
+
+        function onDraw(e) {
+            const pos = getPos(e);
+
+            // Send cursor position
+            if (stompClient && stompClient.connected) {
+                stompClient.send(`/app/whiteboard/${boardId}/cursor`, {}, JSON.stringify({
+                    senderId: myId,
+                    nickname: myNickname,
+                    x: pos.x,
+                    y: pos.y,
+                    color: myColor
+                }));
+            }
+
+            if (!isDrawing) return;
+
+            if (currentTool === 'pen') {
+                drawLine(lastX, lastY, pos.x, pos.y, currentColor, lineWidth);
+                sendDraw('pen', lastX, lastY, pos.x, pos.y);
+                lastX = pos.x;
+                lastY = pos.y;
+            } else if (currentTool === 'eraser') {
+                drawEraser(lastX, lastY, pos.x, pos.y, lineWidth);
+                sendDraw('eraser', lastX, lastY, pos.x, pos.y);
+                lastX = pos.x;
+                lastY = pos.y;
+            } else if (currentTool === 'rect') {
+                restoreSnapshot();
+                drawRect(shapeStartX, shapeStartY, pos.x, pos.y, currentColor, lineWidth);
+            } else if (currentTool === 'circle') {
+                restoreSnapshot();
+                drawCircle(shapeStartX, shapeStartY, pos.x, pos.y, currentColor, lineWidth);
+            }
+        }
+
+        function endDraw(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            if (currentTool === 'rect' || currentTool === 'circle') {
+                const pos = e.changedTouches ? {
+                    x: (e.changedTouches[0].clientX - canvas.getBoundingClientRect().left) / canvas.getBoundingClientRect().width,
+                    y: (e.changedTouches[0].clientY - canvas.getBoundingClientRect().top) / canvas.getBoundingClientRect().height
+                } : getPos(e);
+                sendDraw(currentTool, shapeStartX, shapeStartY, pos.x, pos.y);
+            }
+        }
+
+        function sendDraw(tool, fx, fy, tx, ty) {
+            if (!stompClient || !stompClient.connected) return;
+            stompClient.send(`/app/whiteboard/${boardId}/draw`, {}, JSON.stringify({
+                senderId: myId,
+                tool: tool,
+                color: currentColor,
+                lineWidth: lineWidth,
+                fromX: fx, fromY: fy,
+                toX: tx, toY: ty,
+                action: 'DRAW'
+            }));
+        }
+
+        function handleRemoteDraw(event) {
+            if (event.senderId === myId) return;
+
+            if (event.action === 'CLEAR') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                return;
+            }
+
+            switch (event.tool) {
+                case 'pen':
+                    drawLine(event.fromX, event.fromY, event.toX, event.toY, event.color, event.lineWidth);
+                    break;
+                case 'eraser':
+                    drawEraser(event.fromX, event.fromY, event.toX, event.toY, event.lineWidth);
+                    break;
+                case 'rect':
+                    drawRect(event.fromX, event.fromY, event.toX, event.toY, event.color, event.lineWidth);
+                    break;
+                case 'circle':
+                    drawCircle(event.fromX, event.fromY, event.toX, event.toY, event.color, event.lineWidth);
+                    break;
+            }
+        }
+
+        // --- Remote Cursors ---
+        function updateRemoteCursor(event) {
+            if (event.senderId === myId) return;
+
+            remoteUsers[event.senderId] = { nickname: event.nickname, color: event.color, lastSeen: Date.now() };
+            updateUsersList();
+
+            let el = remoteCursors[event.senderId];
+            if (!el) {
+                el = document.createElement('div');
+                el.className = 'remote-cursor';
+                el.style.setProperty('--cursor-color', event.color);
+                el.innerHTML = `
+                    <div class="cursor-pointer"></div>
+                    <div class="cursor-name">${event.nickname}</div>
+                `;
+                document.getElementById('canvasArea').appendChild(el);
+                remoteCursors[event.senderId] = el;
+            }
+            el.style.left = (event.x * canvas.width) + 'px';
+            el.style.top = (event.y * canvas.height) + 'px';
+        }
+
+        function updateUsersList() {
+            const list = document.getElementById('usersList');
+            // Add self
+            let html = `
+                <div class="user-item">
+                    <div class="user-dot" style="background:${myColor}"></div>
+                    <span>${myNickname} (나)</span>
+                </div>
+            `;
+            const now = Date.now();
+            for (const [id, user] of Object.entries(remoteUsers)) {
+                if (now - user.lastSeen > 10000) {
+                    delete remoteUsers[id];
+                    if (remoteCursors[id]) {
+                        remoteCursors[id].remove();
+                        delete remoteCursors[id];
+                    }
+                    continue;
+                }
+                html += `
+                    <div class="user-item">
+                        <div class="user-dot" style="background:${user.color}"></div>
+                        <span>${user.nickname}</span>
+                    </div>
+                `;
+            }
+            list.innerHTML = html;
+        }
+
+        // Periodic cleanup
+        setInterval(updateUsersList, 5000);
+
+        // --- Clear ---
+        const clearModal = document.getElementById('clearModal');
+        document.getElementById('clearBtn').addEventListener('click', () => {
+            clearModal.classList.add('active');
+        });
+        document.getElementById('clearCancel').addEventListener('click', () => {
+            clearModal.classList.remove('active');
+        });
+        clearModal.addEventListener('click', (e) => {
+            if (e.target === clearModal) clearModal.classList.remove('active');
+        });
+        document.getElementById('clearConfirm').addEventListener('click', () => {
+            clearModal.classList.remove('active');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (stompClient && stompClient.connected) {
+                stompClient.send(`/app/whiteboard/${boardId}/clear`, {}, JSON.stringify({
+                    senderId: myId,
+                    action: 'CLEAR'
+                }));
+            }
+        });
+
+        // --- WebSocket ---
+        function connect() {
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+            stompClient.debug = null;
+
+            stompClient.connect({}, function() {
+                document.getElementById('connStatus').textContent = '✅ Connected';
+
+                stompClient.subscribe(`/topic/whiteboard/${boardId}`, function(msg) {
+                    handleRemoteDraw(JSON.parse(msg.body));
+                });
+
+                stompClient.subscribe(`/topic/whiteboard/${boardId}/cursors`, function(msg) {
+                    updateRemoteCursor(JSON.parse(msg.body));
+                });
+
+                updateUsersList();
+            }, function(error) {
+                document.getElementById('connStatus').textContent = '🔄 재연결 중...';
+                setTimeout(connect, 3000);
+            });
+        }
+
+        connect();
+        updateUsersList();
+    </script>
+</body>
+</html>
